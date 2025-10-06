@@ -324,7 +324,7 @@ class RealTimePoseComparator:
         return best_reference_pose, best_similarity, best_index
     
     def run_comparison(self):
-        """运行实时对比主循环"""
+        """运行实时对比主循环（左摄像头，右顺序循环参考视频，底部实时评分）"""
         print("启动实时姿态对比...")
         print("按 'q' 退出，按 's' 保存截图，按 'p' 暂停/继续")
         
@@ -343,13 +343,14 @@ class RealTimePoseComparator:
         
         paused = False
         last_camera_pose = None
+        reference_play_index = 0
+        last_score_time = time.time()
         last_similarity = 0.0
-        last_reference_index = 0
+        similarity_scores = []
         
         try:
             while self.running:
                 if paused:
-                    # 暂停状态，只处理键盘输入
                     key = cv2.waitKey(100) & 0xFF
                     if key == ord('p'):
                         paused = False
@@ -357,45 +358,40 @@ class RealTimePoseComparator:
                     elif key == ord('q'):
                         break
                     continue
-                
-                # 从队列获取摄像头数据
+
+                # 获取摄像头帧
                 try:
                     camera_frame, camera_pose = self.camera_queue.get(timeout=0.1)
                     last_camera_pose = camera_pose
                 except queue.Empty:
                     camera_pose = last_camera_pose
-                    # 使用上一帧的数据继续处理
                     continue
-                
-                # 计算FPS
-                self.frame_count += 1
-                if self.frame_count % 30 == 0:
-                    current_time = time.time()
-                    self.fps = 30 / (current_time - self.start_time)
-                    self.start_time = current_time
-                
-                # 查找最佳匹配的参考姿态
-                best_ref_pose, similarity, ref_index = self.find_best_reference_match(camera_pose)
-                
-                if best_ref_pose:
-                    last_similarity = similarity
-                    last_reference_index = ref_index
-                    self.similarity_scores.append(similarity)
-                
+
+                # 顺序播放参考视频帧
+                reference_play_index = (reference_play_index + 1) % len(self.reference_poses)
+                ref_pose = self.reference_poses[reference_play_index]
+
+                # 每0.5秒计算一次相似度并保存
+                now = time.time()
+                if now - last_score_time >= 0.5 and camera_pose:
+                    last_similarity = self.calculate_similarity(camera_pose, ref_pose)
+                    similarity_scores.append(last_similarity)
+                    last_score_time = now
+
                 # 创建对比显示画面
-                display_frame = self.create_comparison_display(
-                    camera_frame, camera_pose, best_ref_pose, 
-                    last_similarity, last_reference_index)
-                
+                display_frame = self.create_side_by_side_display(
+                    camera_frame, camera_pose, ref_pose, last_similarity
+                )
+
                 # 显示画面
                 cv2.imshow('Real-time Pose Comparison', display_frame)
-                
-                # 键盘输入处理
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
+
+                # 控制参考视频播放速度（与原视频帧率同步）
+                wait_time = int(1000 / self.reference_fps) if hasattr(self, 'reference_fps') and self.reference_fps > 0 else 33
+                key = cv2.waitKey(wait_time) & 0xFF
+                if key == ord('q') or cv2.getWindowProperty('Real-time Pose Comparison', cv2.WND_PROP_VISIBLE) < 1:
                     break
                 elif key == ord('s'):
-                    # 保存截图
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     filename = f"comparison_screenshot_{timestamp}.jpg"
                     cv2.imwrite(filename, display_frame)
@@ -403,17 +399,49 @@ class RealTimePoseComparator:
                 elif key == ord('p'):
                     paused = True
                     print("暂停")
-                
         except KeyboardInterrupt:
             print("程序被用户中断")
         finally:
             self.running = False
             if self.camera_processing_thread:
                 self.camera_processing_thread.join(timeout=2.0)
-            
             cv2.destroyAllWindows()
+            # 导出评分数据
+            self.similarity_scores = similarity_scores
             self.save_results()
             print("实时姿态对比结束")
+
+    def create_side_by_side_display(self, camera_frame, camera_pose, reference_pose, similarity):
+        """左摄像头，右参考视频，底部居中显示评分"""
+        display_height = 720
+        display_width = 1600
+        display_frame = np.zeros((display_height, display_width, 3), dtype=np.uint8)
+
+        # 摄像头画面
+        camera_display = cv2.resize(camera_frame, (800, 600))
+        if camera_pose:
+            camera_display = self.draw_pose_on_frame(camera_display, camera_pose, "Camera")
+
+        # 参考视频画面
+        reference_display = self.create_reference_visualization(reference_pose, 0)
+
+        # 拼接
+        display_frame[60:660, 0:800] = camera_display
+        display_frame[60:660, 800:1600] = reference_display
+
+        # 标题
+        cv2.putText(display_frame, "实时摄像头画面", (50, 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
+        cv2.putText(display_frame, "参考视频", (900, 40), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
+
+        # 底部居中显示评分
+        score_text = f"实时相似度评分: {similarity:.3f}"
+        text_size = cv2.getTextSize(score_text, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 3)[0]
+        text_x = (display_width - text_size[0]) // 2
+        cv2.putText(display_frame, score_text, (text_x, 700), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 3)
+        return display_frame
     
     def create_comparison_display(self, camera_frame, camera_pose, reference_pose, similarity, ref_index):
         """创建对比显示画面"""
