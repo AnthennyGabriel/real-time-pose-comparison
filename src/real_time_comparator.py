@@ -430,17 +430,26 @@ class RealTimePoseComparator:
         display_frame[60:660, 800:1600] = reference_display
 
         # 标题
-        cv2.putText(display_frame, "实时摄像头画面", (50, 40), 
+        cv2.putText(display_frame, "Camera", (50, 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
-        cv2.putText(display_frame, "参考视频", (900, 40), 
+        cv2.putText(display_frame, "Reference Video", (900, 40), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
 
-        # 底部居中显示评分
-        score_text = f"实时相似度评分: {similarity:.3f}"
-        text_size = cv2.getTextSize(score_text, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 3)[0]
-        text_x = (display_width - text_size[0]) // 2
-        cv2.putText(display_frame, score_text, (text_x, 700), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 3)
+        # 底部一行显示：左侧相似度，右侧反馈
+        score_text = f"Similarity Score: {similarity:.3f}"
+        feedback_text = None
+        if similarity < 0.3:
+            feedback_text = "Try to adjust your pose to match the reference more closely!"
+        elif similarity > 0.75:
+            feedback_text = "Similarity is very high!"
+        # 相似度分数左侧
+        cv2.putText(display_frame, score_text, (50, 700), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 255), 3)
+        # 反馈文字右侧
+        if feedback_text:
+            fb_x = 400  # 适当右移，避免与分数重叠
+            cv2.putText(display_frame, feedback_text, (fb_x, 700),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 128, 255), 2)
         return display_frame
     
     def create_comparison_display(self, camera_frame, camera_pose, reference_pose, similarity, ref_index):
@@ -465,7 +474,7 @@ class RealTimePoseComparator:
             reference_display = self.create_reference_visualization(reference_pose, ref_index)
         else:
             reference_display = np.zeros((600, 800, 3), dtype=np.uint8)
-            cv2.putText(reference_display, "等待检测到人体姿态...", 
+            cv2.putText(reference_display, "Waiting for pose detection...", 
                        (100, 300), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
         
         # 将两个画面并排放置
@@ -473,13 +482,13 @@ class RealTimePoseComparator:
         display_frame[60:660, 800:1600] = reference_display
         
         # 添加标题和分数
-        cv2.putText(display_frame, "实时摄像头画面", (50, 40), 
+        cv2.putText(display_frame, "Camera", (50, 40), 
                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
-        cv2.putText(display_frame, "最佳匹配参考姿态", (850, 40), 
+        cv2.putText(display_frame, "Best Match Reference Pose", (850, 40), 
                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 2)
         
         # 显示相似度分数
-        score_text = f"相似度: {similarity:.3f}"
+        score_text = f"Similarity: {similarity:.3f}"
         score_color = (0, 255, 0) if similarity > 0.7 else (0, 165, 255) if similarity > 0.5 else (0, 0, 255)
         cv2.putText(display_frame, score_text, (650, 680), 
                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, score_color, 3)
@@ -487,7 +496,7 @@ class RealTimePoseComparator:
         # 显示FPS和帮助信息
         cv2.putText(display_frame, f"FPS: {self.fps:.1f}", (50, 680), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(display_frame, "按 'q'退出 's'保存 'p'暂停", (1000, 680), 
+        cv2.putText(display_frame, "Press 'q' to quit, 's' to save, 'p' to pause", (1000, 680), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
         return display_frame
@@ -527,15 +536,15 @@ class RealTimePoseComparator:
         # 如果有原始帧，显示原始帧并画骨架
         if 'frame' in reference_pose and reference_pose['frame'] is not None:
             vis_frame = cv2.resize(reference_pose['frame'], (800, 600))
-            vis_frame = self.draw_pose_on_frame(vis_frame, reference_pose, f"参考姿态 #{ref_index}")
+            vis_frame = self.draw_pose_on_frame(vis_frame, reference_pose, f"Reference Pose #{ref_index}")
         else:
             # 没有原始帧则显示空白
             vis_frame = np.zeros((600, 800, 3), dtype=np.uint8)
-            cv2.putText(vis_frame, "无原始帧", (100, 300), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(vis_frame, "No original frame", (100, 300), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         # 显示参考帧的时间信息
         if 'timestamp' in reference_pose:
-            time_text = f"时间: {reference_pose['timestamp']:.2f}s"
+            time_text = f"Time: {reference_pose['timestamp']:.2f}s"
             cv2.putText(vis_frame, time_text, (10, 60), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
